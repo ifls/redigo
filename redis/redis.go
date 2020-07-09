@@ -35,13 +35,13 @@ type Conn interface {
 	// Do sends a command to the server and returns the received reply.
 	Do(commandName string, args ...interface{}) (reply interface{}, err error)
 
-	// Send writes the command to the client's output buffer.
+	// Send writes the command to the client's output buffer. 写到缓冲区, 不执行
 	Send(commandName string, args ...interface{}) error
 
-	// Flush flushes the output buffer to the Redis server.
+	// Flush flushes the output buffer to the Redis server. 缓冲区发送到服务器
 	Flush() error
 
-	// Receive receives a single reply from the Redis server
+	// Receive receives a single reply from the Redis server 读取回复
 	Receive() (reply interface{}, err error)
 }
 

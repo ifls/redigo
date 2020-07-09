@@ -44,14 +44,15 @@ var (
 	errConnClosed = errors.New("redigo: connection closed")
 )
 
-// Pool maintains a pool of connections. The application calls the Get method
+// Pool maintains a pool of connections.
+// The application calls the Get method
 // to get a connection from the pool and the connection's Close method to
 // return the connection's resources to the pool.
 //
-// The following example shows how to use a pool in a web application. The
-// application creates a pool at application startup and makes it available to
-// request handlers using a package level variable. The pool configuration used
-// here is an example, not a recommendation.
+// The following example shows how to use a pool in a web application.
+// The application creates a pool at application startup and makes it available to
+// request handlers using a package level variable.
+// The pool configuration used here is an example, not a recommendation.
 //
 //  func newPool(addr string) *redis.Pool {
 //    return &redis.Pool{
@@ -104,9 +105,8 @@ var (
 //    },
 //  }
 //
-// Use the TestOnBorrow function to check the health of an idle connection
-// before the connection is returned to the application. This example PINGs
-// connections that have been idle more than a minute:
+// Use the TestOnBorrow function to check the health of an idle connection before the connection is returned to the application.
+// This example PINGs connections that have been idle more than a minute:
 //
 //  pool := &redis.Pool{
 //    // Other pool configuration not shown in this example.
@@ -136,7 +136,8 @@ type Pool struct {
 
 	// TestOnBorrow is an optional application supplied function for checking
 	// the health of an idle connection before the connection is used again by
-	// the application. Argument t is the time that the connection was returned
+	// the application. 检查连接是否健康
+	// Argument t is the time that the connection was returned
 	// to the pool. If the function returns an error, then the connection is
 	// closed.
 	TestOnBorrow func(c Conn, t time.Time) error
@@ -155,7 +156,7 @@ type Pool struct {
 
 	// If Wait is true and the pool is at the MaxActive limit, then Get() waits
 	// for a connection to be returned to the pool before returning.
-	Wait bool
+	Wait bool //连接过多, 等待
 
 	// Close connections older than this duration. If the value is zero, then
 	// the pool does not close connections based on age.
@@ -164,10 +165,10 @@ type Pool struct {
 	chInitialized uint32 // set to 1 when field ch is initialized
 
 	mu           sync.Mutex    // mu protects the following fields
-	closed       bool          // set to true when the pool is closed.
+	closed       bool          // 关闭连接池 set to true when the pool is closed.
 	active       int           // the number of open connections in the pool
 	ch           chan struct{} // limits open connections when p.Wait is true
-	idle         idleList      // idle connections
+	idle         idleList      // 空闲链表 idle connections
 	waitCount    int64         // total number of connections waited for.
 	waitDuration time.Duration // total time waited for new connections.
 }
@@ -200,6 +201,7 @@ func (p *Pool) Get() Conn {
 // returned connection.
 func (p *Pool) GetContext(ctx context.Context) (Conn, error) {
 	// Wait until there is a vacant connection in the pool.
+	// 等待空闲连接
 	waited, err := p.waitVacantConn(ctx)
 	if err != nil {
 		return errorConn{err}, err
@@ -212,7 +214,7 @@ func (p *Pool) GetContext(ctx context.Context) (Conn, error) {
 		p.waitDuration += waited
 	}
 
-	// Prune stale connections at the back of the idle list.
+	// Prune stale超时 connections at the back of the idle list.
 	if p.IdleTimeout > 0 {
 		n := p.idle.count
 		for i := 0; i < n && p.idle.back != nil && p.idle.back.t.Add(p.IdleTimeout).Before(nowFunc()); i++ {
@@ -230,6 +232,7 @@ func (p *Pool) GetContext(ctx context.Context) (Conn, error) {
 		pc := p.idle.front
 		p.idle.popFront()
 		p.mu.Unlock()
+		//拿到空闲连接
 		if (p.TestOnBorrow == nil || p.TestOnBorrow(pc.c, pc.t) == nil) &&
 			(p.MaxConnLifetime == 0 || nowFunc().Sub(pc.created) < p.MaxConnLifetime) {
 			return &activeConn{p: p, pc: pc}, nil
@@ -249,11 +252,13 @@ func (p *Pool) GetContext(ctx context.Context) (Conn, error) {
 	// Handle limit for p.Wait == false.
 	if !p.Wait && p.MaxActive > 0 && p.active >= p.MaxActive {
 		p.mu.Unlock()
+		//拿不到连接
 		return errorConn{ErrPoolExhausted}, ErrPoolExhausted
 	}
 
 	p.active++
 	p.mu.Unlock()
+	//建立新的连接
 	c, err := p.dial(ctx)
 	if err != nil {
 		c = nil
@@ -586,6 +591,7 @@ type idleList struct {
 	front, back *poolConn
 }
 
+// 管理连接, 链表
 type poolConn struct {
 	c          Conn
 	t          time.Time
