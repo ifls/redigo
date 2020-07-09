@@ -12,6 +12,7 @@
 // License for the specific language governing permissions and limitations
 // under the License.
 
+// 都是一些 拨号选项 和 拨号函数, 以及对普通网络连接的封装函数
 package redis
 
 import (
@@ -34,7 +35,7 @@ var (
 	_ ConnWithTimeout = (*conn)(nil)
 )
 
-// conn is the low-level implementation of Conn
+// conn is the low-level implementation of Conn 实际实现, 其他的实现都是包装
 type conn struct {
 	// Shared
 	mu      sync.Mutex
@@ -79,7 +80,7 @@ type dialOptions struct {
 	writeTimeout time.Duration
 	dialer       *net.Dialer
 	dialContext  func(ctx context.Context, network, addr string) (net.Conn, error)
-	db           int
+	db           int // 几号 db
 	username     string
 	password     string
 	clientName   string
@@ -353,10 +354,12 @@ func NewConn(netConn net.Conn, readTimeout, writeTimeout time.Duration) Conn {
 	}
 }
 
+// 关闭网络连接
 func (c *conn) Close() error {
 	c.mu.Lock()
 	err := c.err
 	if c.err == nil {
+		// 关闭后返回 error
 		c.err = errors.New("redigo: closed")
 		err = c.conn.Close()
 	}
@@ -364,6 +367,7 @@ func (c *conn) Close() error {
 	return err
 }
 
+// 记录 致命错误
 func (c *conn) fatal(err error) error {
 	c.mu.Lock()
 	if c.err == nil {

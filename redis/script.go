@@ -21,8 +21,9 @@ import (
 	"strings"
 )
 
-// Script encapsulates the source, hash and key count for a Lua script. See
-// http://redis.io/commands/eval for information on scripts in Redis.
+// eval 命令 执行脚本 lua
+// Script encapsulates the source, hash and key count for a Lua script.
+// See todo http://redis.io/commands/eval for information on scripts in Redis.
 type Script struct {
 	keyCount int
 	src      string

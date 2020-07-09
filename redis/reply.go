@@ -14,6 +14,7 @@
 
 package redis
 
+// 解析返回的 interface{} 成具体类型
 import (
 	"errors"
 	"fmt"

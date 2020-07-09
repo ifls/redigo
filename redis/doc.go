@@ -14,18 +14,15 @@
 
 // Package redis is a client for the Redis database.
 //
-// The Redigo FAQ (https://github.com/gomodule/redigo/wiki/FAQ) contains more
-// documentation about this package.
+// The Redigo FAQ todo (https://github.com/gomodule/redigo/wiki/FAQ) contains more documentation about this package.
 //
 // Connections
 //
 // The Conn interface is the primary interface for working with Redis.
-// Applications create connections by calling the Dial, DialWithTimeout or
-// NewConn functions. In the future, functions will be added for creating
-// sharded and other types of connections.
+// Applications create connections by calling the Dial, DialWithTimeout or NewConn functions.
+// In the future, functions will be added for creating sharded分片 and other types of connections.
 //
-// The application must call the connection Close method when the application
-// is done with the connection.
+// The application must call the connection Close method when the application is done with the connection.
 //
 // Executing Commands
 //
@@ -33,8 +30,8 @@
 //
 //  Do(commandName string, args ...interface{}) (reply interface{}, err error)
 //
-// The Redis command reference (http://redis.io/commands) lists the available
-// commands. An example of using the Redis APPEND command is:
+// The Redis command reference todo (http://redis.io/commands) lists the available commands.
+// An example of using the Redis APPEND command is:
 //
 //  n, err := conn.Do("APPEND", "key", "value")
 //
@@ -59,10 +56,9 @@
 //  bulk string             []byte or nil if value not present.
 //  array                   []interface{} or nil if value not present.
 //
-// Use type assertions or the reply helper functions to convert from
-// interface{} to the specific Go type for the command result.
+// Use type assertions or the reply helper (在 reply.go) functions to convert from interface{} to the specific Go type for the command result.
 //
-// Pipelining
+// Pipelining 流水线
 //
 // Connections support pipelining using the Send, Flush and Receive methods.
 //
@@ -70,26 +66,27 @@
 //  Flush() error
 //  Receive() (reply interface{}, err error)
 //
-// Send writes the command to the connection's output buffer. Flush flushes the
-// connection's output buffer to the server. Receive reads a single reply from
-// the server. The following example shows a simple pipeline.
+// Send writes the command to the connection's output buffer.
+// Flush flushes the connection's output buffer to the server.
+// Receive reads a single reply from the server.
+// The following example shows a simple pipeline.
 //
 //  c.Send("SET", "foo", "bar")
 //  c.Send("GET", "foo")
 //  c.Flush()
-//  c.Receive() // reply from SET
+//  c.Receive() // reply from SET  需要多次 receive, 一次读取一条命令的结构
 //  v, err = c.Receive() // reply from GET
 //
-// The Do method combines the functionality of the Send, Flush and Receive
-// methods. The Do method starts by writing the command and flushing the output
-// buffer. Next, the Do method receives all pending replies including the reply
-// for the command just sent by Do. If any of the received replies is an error,
-// then Do returns the error. If there are no errors, then Do returns the last
-// reply. If the command argument to the Do method is "", then the Do method
+// The Do method combines the functionality of the Send, Flush and Receive methods.
+// The Do method starts by writing the command and flushing the output buffer.
+// Next, the Do method receives all pending replies including the reply for the command just sent by Do.
+// If any of the received replies is an error, then Do returns the error.
+// If there are no errors, then Do returns the last reply.
+// If the command argument to the Do method is "", then the Do method
 // will flush the output buffer and receive pending replies without sending a
-// command.
+// command. 发送 "" 就代表刷新缓冲
 //
-// Use the Send and Do methods to implement pipelined transactions.
+// Use the Send and Do methods to implement pipelined transactions 事务, 只保证隔离性.
 //
 //  c.Send("MULTI")
 //  c.Send("INCR", "foo")
@@ -142,12 +139,10 @@
 //
 // Reply Helpers
 //
-// The Bool, Int, Bytes, String, Strings and Values functions convert a reply
-// to a value of a specific type. To allow convenient wrapping of calls to the
-// connection Do and Receive methods, the functions take a second argument of
-// type error.  If the error is non-nil, then the helper function returns the
-// error. If the error is nil, the function converts the reply to the specified
-// type:
+// The Bool, Int, Bytes, String, Strings and Values functions convert a reply to a value of a specific type.
+// To allow convenient wrapping of calls to the connection Do and Receive methods, the functions take a second argument of type error.
+// If the error is non-nil, then the helper function returns the error.
+// If the error is nil, the function converts the reply to the specified type:
 //
 //  exists, err := redis.Bool(c.Do("EXISTS", "foo"))
 //  if err != nil {
@@ -155,7 +150,7 @@
 //  }
 //
 // The Scan function converts elements of a array reply to Go types:
-//
+// 用扫描 帮助函数更方便
 //  var value1 int
 //  var value2 string
 //  reply, err := redis.Values(c.Do("MGET", "key1", "key2"))
@@ -168,10 +163,10 @@
 //
 // Errors
 //
-// Connection methods return error replies from the server as type redis.Error.
+// Connection methods return error replies from the server as type redis.Error. 所有 err 都会即时返回, conn.fatal 函数 记录致命错误, 这样可以之后再次获取
 //
 // Call the connection Err() method to determine if the connection encountered
-// non-recoverable error such as a network error or protocol parsing error. If
-// Err() returns a non-nil value, then the connection is not usable and should
-// be closed.
+// non-recoverable error such as a network error or protocol parsing error. 不可恢复错误
+
+// If Err() returns a non-nil value, then the connection is not usable and should be closed.
 package redis

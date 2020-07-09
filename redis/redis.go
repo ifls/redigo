@@ -12,6 +12,7 @@
 // License for the specific language governing permissions and limitations
 // under the License.
 
+// 接口 和 全局函数
 package redis
 
 import (
@@ -20,7 +21,7 @@ import (
 )
 
 // Error represents an error returned in a command reply.
-type Error string
+type Error string //定义 redis 错误
 
 func (err Error) Error() string { return string(err) }
 

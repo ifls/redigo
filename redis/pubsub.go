@@ -14,6 +14,7 @@
 
 package redis
 
+// 发布订阅
 import (
 	"errors"
 	"time"

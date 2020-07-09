@@ -14,6 +14,7 @@
 
 package redis
 
+// 类型转换
 import (
 	"errors"
 	"fmt"
@@ -589,6 +590,7 @@ func ScanSlice(src []interface{}, dest interface{}, fieldNames ...string) error 
 }
 
 // Args is a helper for constructing command arguments from structured values.
+// 封装参数列表
 type Args []interface{}
 
 // Add returns the result of appending value to args.

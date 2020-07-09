@@ -14,6 +14,7 @@
 
 package redis
 
+// 封装 redis 连接并打印日志
 import (
 	"bytes"
 	"fmt"

@@ -156,7 +156,7 @@ type Pool struct {
 
 	// If Wait is true and the pool is at the MaxActive limit, then Get() waits
 	// for a connection to be returned to the pool before returning.
-	Wait bool //连接过多, 等待
+	Wait bool //连接过多, 等待可以拿到实际可用的连接 主动设置的值
 
 	// Close connections older than this duration. If the value is zero, then
 	// the pool does not close connections based on age.
@@ -488,6 +488,7 @@ func (ac *activeConn) Close() error {
 		pc.c.Send("ECHO", sentinel)
 		pc.c.Flush()
 		for {
+			// 读光数据
 			p, err := pc.c.Receive()
 			if err != nil {
 				break
@@ -499,6 +500,7 @@ func (ac *activeConn) Close() error {
 		}
 	}
 	pc.c.Do("")
+	// 放回池子
 	ac.p.put(pc, ac.state != 0 || pc.c.Err() != nil)
 	return nil
 }
