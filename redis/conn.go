@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/url"
 	"regexp"
@@ -39,7 +40,7 @@ var (
 type conn struct {
 	// Shared
 	mu      sync.Mutex
-	pending int
+	pending int // 标记有多少个命令, 需要执行, 有多少个结果, 需要接收
 	err     error
 	conn    net.Conn
 
@@ -78,15 +79,20 @@ type DialOption struct {
 type dialOptions struct {
 	readTimeout  time.Duration
 	writeTimeout time.Duration
-	dialer       *net.Dialer
-	dialContext  func(ctx context.Context, network, addr string) (net.Conn, error)
-	db           int // 几号 db
-	username     string
-	password     string
-	clientName   string
-	useTLS       bool
-	skipVerify   bool
-	tlsConfig    *tls.Config
+
+	dialer *net.Dialer
+	// 有连接超时
+	dialContext func(ctx context.Context, network, addr string) (net.Conn, error)
+
+	db         int // 几号 db
+	username   string
+	password   string
+	clientName string // 客户端标志
+
+	// tls 加密相关
+	useTLS     bool
+	skipVerify bool // tls.Config{InsecureSkipVerify
+	tlsConfig  *tls.Config
 }
 
 // DialReadTimeout specifies the timeout for reading a single command reply.
@@ -298,7 +304,7 @@ func DialURL(rawurl string, options ...DialOption) (Conn, error) {
 		return nil, fmt.Errorf("invalid redis URL scheme: %s", u.Scheme)
 	}
 
-	if u.Opaque != "" {
+	if u.Opaque != "" { // ??
 		return nil, fmt.Errorf("invalid redis URL, url is opaque: %s", rawurl)
 	}
 
@@ -401,13 +407,17 @@ func (c *conn) writeLen(prefix byte, n int) error {
 	}
 	c.lenScratch[i] = prefix
 	_, err := c.bw.Write(c.lenScratch[i:])
+	printSend(c.lenScratch[i : len(c.lenScratch)-2])
 	return err
 }
 
+// 带上\r\n
 func (c *conn) writeString(s string) error {
-	c.writeLen('$', len(s))
+	c.writeLen('$', len(s)) // 数组里的一条
 	c.bw.WriteString(s)
+
 	_, err := c.bw.WriteString("\r\n")
+	printSend([]byte(s))
 	return err
 }
 
@@ -415,6 +425,7 @@ func (c *conn) writeBytes(p []byte) error {
 	c.writeLen('$', len(p))
 	c.bw.Write(p)
 	_, err := c.bw.WriteString("\r\n")
+	printSend(p)
 	return err
 }
 
@@ -427,7 +438,7 @@ func (c *conn) writeFloat64(n float64) error {
 }
 
 func (c *conn) writeCommand(cmd string, args []interface{}) error {
-	c.writeLen('*', 1+len(args))
+	c.writeLen('*', 1+len(args)) // 数组格式
 	if err := c.writeString(cmd); err != nil {
 		return err
 	}
@@ -439,6 +450,7 @@ func (c *conn) writeCommand(cmd string, args []interface{}) error {
 	return nil
 }
 
+// 写入字符串都是\r\n结尾
 func (c *conn) writeArg(arg interface{}, argumentTypeOK bool) (err error) {
 	switch arg := arg.(type) {
 	case string:
@@ -492,6 +504,7 @@ func (c *conn) readLine() ([]byte, error) {
 	if err == bufio.ErrBufferFull {
 		// The line does not fit in the bufio.Reader's buffer. Fall back to
 		// allocating a buffer for the line.
+		// 读一点, 就放到缓冲区
 		buf := append([]byte{}, p...)
 		for err == bufio.ErrBufferFull {
 			p, err = c.br.ReadSlice('\n')
@@ -506,6 +519,7 @@ func (c *conn) readLine() ([]byte, error) {
 	if i < 0 || p[i] != '\r' {
 		return nil, protocolError("bad response line terminator")
 	}
+	printReply(p[:i])
 	return p[:i], nil
 }
 
@@ -539,7 +553,7 @@ func parseInt(p []byte) (interface{}, error) {
 	}
 
 	var negate bool
-	if p[0] == '-' {
+	if p[0] == '-' { // 处理负数
 		negate = true
 		p = p[1:]
 		if len(p) == 0 {
@@ -576,7 +590,7 @@ func (c *conn) readReply() (interface{}, error) {
 		return nil, protocolError("short response line")
 	}
 	switch line[0] {
-	case '+':
+	case '+': // 简单字符串 回复
 		switch string(line[1:]) {
 		case "OK":
 			// Avoid allocation for frequent "+OK" response.
@@ -587,12 +601,12 @@ func (c *conn) readReply() (interface{}, error) {
 		default:
 			return string(line[1:]), nil
 		}
-	case '-':
+	case '-': // 错误信息回复
 		return Error(string(line[1:])), nil
-	case ':':
+	case ':': // 整型回复
 		return parseInt(line[1:])
-	case '$':
-		n, err := parseLen(line[1:])
+	case '$': // 大容量字符串 多消息回复里的单个命令
+		n, err := parseLen(line[1:]) // 长度
 		if n < 0 || err != nil {
 			return nil, err
 		}
@@ -601,14 +615,16 @@ func (c *conn) readReply() (interface{}, error) {
 		if err != nil {
 			return nil, err
 		}
+		printReply(p)
+		// 读一行
 		if line, err := c.readLine(); err != nil {
 			return nil, err
 		} else if len(line) != 0 {
 			return nil, protocolError("bad bulk string format")
 		}
 		return p, nil
-	case '*':
-		n, err := parseLen(line[1:])
+	case '*': // 数组 多消息回复
+		n, err := parseLen(line[1:]) // 行数
 		if n < 0 || err != nil {
 			return nil, err
 		}
@@ -637,10 +653,12 @@ func (c *conn) Send(cmd string, args ...interface{}) error {
 	return nil
 }
 
+// 刷到socket 内核缓冲区, 也就是发送服务器
 func (c *conn) Flush() error {
 	if c.writeTimeout != 0 {
 		c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 	}
+
 	if err := c.bw.Flush(); err != nil {
 		return c.fatal(err)
 	}
@@ -658,6 +676,7 @@ func (c *conn) ReceiveWithTimeout(timeout time.Duration) (reply interface{}, err
 	}
 	c.conn.SetReadDeadline(deadline)
 
+	// 读取回复
 	if reply, err = c.readReply(); err != nil {
 		return nil, c.fatal(err)
 	}
@@ -713,7 +732,7 @@ func (c *conn) DoWithTimeout(readTimeout time.Duration, cmd string, args ...inte
 	}
 	c.conn.SetReadDeadline(deadline)
 
-	if cmd == "" {
+	if cmd == "" { // 当前没有命令, 处理之前的
 		reply := make([]interface{}, pending)
 		for i := range reply {
 			r, e := c.readReply()
@@ -727,6 +746,7 @@ func (c *conn) DoWithTimeout(readTimeout time.Duration, cmd string, args ...inte
 
 	var err error
 	var reply interface{}
+	// 只需要最后一条命令的结果
 	for i := 0; i <= pending; i++ {
 		var e error
 		if reply, e = c.readReply(); e != nil {
@@ -737,4 +757,12 @@ func (c *conn) DoWithTimeout(readTimeout time.Duration, cmd string, args ...inte
 		}
 	}
 	return reply, err
+}
+
+func printReply(p []byte) {
+	log.Println("<-[" + string(p) + `\r\n]`)
+}
+
+func printSend(p []byte) {
+	log.Println("->[" + string(p) + `\r\n]`)
 }
