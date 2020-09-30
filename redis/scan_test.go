@@ -22,8 +22,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gomodule/redigo/redis"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gomodule/redigo/redis"
 )
 
 type durationScan struct {
@@ -654,4 +655,10 @@ func ExampleArgs() {
 	// Output:
 	// {Title:Example Author:Gary Body:Hello}
 	// {Title:Example2 Author:Steve Body:Map}
+
+	c.Do("HGETALL", "hhh")
+	c.Do("SET", "kkk", "vv")
+	c.Do("INCR", "kkk")
+	c.Do("LASTSAVE") // 时间戳, 秒级
+	c.Do("get", "un existed key")
 }

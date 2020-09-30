@@ -590,7 +590,7 @@ func (c *conn) readReply() (interface{}, error) {
 		return nil, protocolError("short response line")
 	}
 	switch line[0] {
-	case '+': // 简单字符串 回复
+	case '+': // 状态回复
 		switch string(line[1:]) {
 		case "OK":
 			// Avoid allocation for frequent "+OK" response.
@@ -603,31 +603,34 @@ func (c *conn) readReply() (interface{}, error) {
 		}
 	case '-': // 错误信息回复
 		return Error(string(line[1:])), nil
-	case ':': // 整型回复
+	case ':': // 整数回复
 		return parseInt(line[1:])
-	case '$': // 大容量字符串 多消息回复里的单个命令
-		n, err := parseLen(line[1:]) // 长度
+	case '$': // 批量回复 大容量字符串 多消息回复里的单个命令
+		n, err := parseLen(line[1:]) // 读一行长度
 		if n < 0 || err != nil {
 			return nil, err
 		}
+
 		p := make([]byte, n)
-		_, err = io.ReadFull(c.br, p)
+		_, err = io.ReadFull(c.br, p) // 根据长度读数据
 		if err != nil {
 			return nil, err
 		}
 		printReply(p)
-		// 读一行
+		// 读调\r\n
 		if line, err := c.readLine(); err != nil {
 			return nil, err
 		} else if len(line) != 0 {
 			return nil, protocolError("bad bulk string format")
 		}
 		return p, nil
-	case '*': // 数组 多消息回复
+	case '*': // 多条批量回复 数组 多消息回复
 		n, err := parseLen(line[1:]) // 行数
 		if n < 0 || err != nil {
 			return nil, err
 		}
+
+		// 读多个回复
 		r := make([]interface{}, n)
 		for i := range r {
 			r[i], err = c.readReply()
@@ -716,12 +719,13 @@ func (c *conn) DoWithTimeout(readTimeout time.Duration, cmd string, args ...inte
 		c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 	}
 
-	if cmd != "" {
+	if cmd != "" { // 写入当前命令,
 		if err := c.writeCommand(cmd, args); err != nil {
 			return nil, c.fatal(err)
 		}
 	}
 
+	// 发送当前和之前的所有命令
 	if err := c.bw.Flush(); err != nil {
 		return nil, c.fatal(err)
 	}

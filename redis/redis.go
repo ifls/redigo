@@ -21,7 +21,7 @@ import (
 )
 
 // Error represents an error returned in a command reply.
-type Error string //定义 redis 错误
+type Error string // 定义 redis 错误
 
 func (err Error) Error() string { return string(err) }
 

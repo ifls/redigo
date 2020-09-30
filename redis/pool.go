@@ -156,7 +156,7 @@ type Pool struct {
 
 	// If Wait is true and the pool is at the MaxActive limit, then Get() waits
 	// for a connection to be returned to the pool before returning.
-	Wait bool //连接过多, 等待可以拿到实际可用的连接 主动设置的值
+	Wait bool // 连接过多, true表示等待可以拿到实际可用的连接 主动设置的值
 
 	// Close connections older than this duration. If the value is zero, then
 	// the pool does not close connections based on age.
@@ -232,7 +232,7 @@ func (p *Pool) GetContext(ctx context.Context) (Conn, error) {
 		pc := p.idle.front
 		p.idle.popFront()
 		p.mu.Unlock()
-		//拿到空闲连接
+		// 拿到空闲连接
 		if (p.TestOnBorrow == nil || p.TestOnBorrow(pc.c, pc.t) == nil) &&
 			(p.MaxConnLifetime == 0 || nowFunc().Sub(pc.created) < p.MaxConnLifetime) {
 			return &activeConn{p: p, pc: pc}, nil
@@ -252,13 +252,13 @@ func (p *Pool) GetContext(ctx context.Context) (Conn, error) {
 	// Handle limit for p.Wait == false.
 	if !p.Wait && p.MaxActive > 0 && p.active >= p.MaxActive {
 		p.mu.Unlock()
-		//拿不到连接
+		// 拿不到连接
 		return errorConn{ErrPoolExhausted}, ErrPoolExhausted
 	}
 
 	p.active++
 	p.mu.Unlock()
-	//建立新的连接
+	// 建立新的连接
 	c, err := p.dial(ctx)
 	if err != nil {
 		c = nil
@@ -343,11 +343,13 @@ func (p *Pool) Close() error {
 	return nil
 }
 
+// sync.Once更好
 func (p *Pool) lazyInit() {
 	// Fast path.
 	if atomic.LoadUint32(&p.chInitialized) == 1 {
 		return
 	}
+
 	// Slow path.
 	p.mu.Lock()
 	if p.chInitialized == 0 {
@@ -359,6 +361,7 @@ func (p *Pool) lazyInit() {
 				p.ch <- struct{}{}
 			}
 		}
+
 		atomic.StoreUint32(&p.chInitialized, 1)
 	}
 	p.mu.Unlock()
@@ -370,6 +373,7 @@ func (p *Pool) lazyInit() {
 //
 // If there were no vacant connection in the pool right away it returns the time spent waiting
 // for that connection to appear in the pool.
+// valid 空闲
 func (p *Pool) waitVacantConn(ctx context.Context) (waited time.Duration, err error) {
 	if !p.Wait || p.MaxActive <= 0 {
 		// No wait or no connection limit.
@@ -386,7 +390,7 @@ func (p *Pool) waitVacantConn(ctx context.Context) (waited time.Duration, err er
 		start = time.Now()
 	}
 
-	select {
+	select { // 阻塞
 	case <-p.ch:
 		// Additionally check that context hasn't expired while we were waiting,
 		// because `select` picks a random `case` if several of them are "ready".
@@ -399,7 +403,7 @@ func (p *Pool) waitVacantConn(ctx context.Context) (waited time.Duration, err er
 		return 0, ctx.Err()
 	}
 
-	if wait {
+	if wait { // 计算等待了多长时间
 		return time.Since(start), nil
 	}
 	return 0, nil
@@ -442,6 +446,7 @@ func (p *Pool) put(pc *poolConn, forceClose bool) error {
 	return nil
 }
 
+//
 type activeConn struct {
 	p     *Pool
 	pc    *poolConn
@@ -465,6 +470,7 @@ func initSentinel() {
 	}
 }
 
+// 清光回复, 放回空闲链表
 func (ac *activeConn) Close() error {
 	pc := ac.pc
 	if pc == nil {
@@ -575,6 +581,7 @@ func (ac *activeConn) ReceiveWithTimeout(timeout time.Duration) (reply interface
 	return cwt.ReceiveWithTimeout(timeout)
 }
 
+// 失败连接
 type errorConn struct{ err error }
 
 func (ec errorConn) Do(string, ...interface{}) (interface{}, error) { return nil, ec.err }
@@ -593,7 +600,7 @@ type idleList struct {
 	front, back *poolConn
 }
 
-// 管理连接, 链表
+// 管理连接的链表节点node
 type poolConn struct {
 	c          Conn
 	t          time.Time
