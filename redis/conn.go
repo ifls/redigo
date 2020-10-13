@@ -33,6 +33,7 @@ import (
 )
 
 var (
+	// 验证接口,
 	_ ConnWithTimeout = (*conn)(nil)
 )
 
@@ -46,17 +47,17 @@ type conn struct {
 
 	// Read
 	readTimeout time.Duration
-	br          *bufio.Reader
+	br          *bufio.Reader // 缓冲读
 
 	// Write
 	writeTimeout time.Duration
-	bw           *bufio.Writer
+	bw           *bufio.Writer // 缓冲写
 
-	// Scratch space for formatting argument length.
+	// Scratch space for formatting argument length. 参数长度
 	// '*' or '$', length, "\r\n"
 	lenScratch [32]byte
 
-	// Scratch space for formatting integers and floats.
+	// Scratch space for formatting integers and floats. 整数和浮点
 	numScratch [40]byte
 }
 
@@ -223,6 +224,7 @@ func DialContext(ctx context.Context, network, address string, options ...DialOp
 		do.dialContext = do.dialer.DialContext
 	}
 
+	// 拨号网络连接
 	netConn, err := do.dialContext(ctx, network, address)
 	if err != nil {
 		return nil, err
@@ -260,7 +262,7 @@ func DialContext(ctx context.Context, network, address string, options ...DialOp
 		writeTimeout: do.writeTimeout,
 	}
 
-	if do.password != "" {
+	if do.password != "" { // 认证
 		authArgs := make([]interface{}, 0, 2)
 		if do.username != "" {
 			authArgs = append(authArgs, do.username)
@@ -272,14 +274,14 @@ func DialContext(ctx context.Context, network, address string, options ...DialOp
 		}
 	}
 
-	if do.clientName != "" {
+	if do.clientName != "" { // 设置客户端名字
 		if _, err := c.Do("CLIENT", "SETNAME", do.clientName); err != nil {
 			netConn.Close()
 			return nil, err
 		}
 	}
 
-	if do.db != 0 {
+	if do.db != 0 { // 选择数据库
 		if _, err := c.Do("SELECT", do.db); err != nil {
 			netConn.Close()
 			return nil, err
@@ -294,6 +296,7 @@ var pathDBRegexp = regexp.MustCompile(`/(\d*)\z`)
 // DialURL connects to a Redis server at the given URL using the Redis
 // URI scheme. URLs should follow the draft IANA specification for the
 // scheme (https://www.iana.org/assignments/uri-schemes/prov/redis).
+// 拨号连接
 func DialURL(rawurl string, options ...DialOption) (Conn, error) {
 	u, err := url.Parse(rawurl)
 	if err != nil {
@@ -345,11 +348,12 @@ func DialURL(rawurl string, options ...DialOption) (Conn, error) {
 	}
 
 	options = append(options, DialUseTLS(u.Scheme == "rediss"))
-
+	// 之前都是解析出地址和选项
 	return Dial("tcp", address, options...)
 }
 
 // NewConn returns a new Redigo connection for the given net connection.
+// 用已有连接创建redis 客户端连接
 func NewConn(netConn net.Conn, readTimeout, writeTimeout time.Duration) Conn {
 	return &conn{
 		conn:         netConn,
@@ -373,7 +377,7 @@ func (c *conn) Close() error {
 	return err
 }
 
-// 记录 致命错误
+// 记录 致命错误, 关闭连接
 func (c *conn) fatal(err error) error {
 	c.mu.Lock()
 	if c.err == nil {
@@ -393,10 +397,13 @@ func (c *conn) Err() error {
 	return err
 }
 
+// 整型转字符串
 func (c *conn) writeLen(prefix byte, n int) error {
 	c.lenScratch[len(c.lenScratch)-1] = '\n'
 	c.lenScratch[len(c.lenScratch)-2] = '\r'
 	i := len(c.lenScratch) - 3
+
+	// do-while 循环
 	for {
 		c.lenScratch[i] = byte('0' + n%10)
 		i -= 1
@@ -406,6 +413,7 @@ func (c *conn) writeLen(prefix byte, n int) error {
 		}
 	}
 	c.lenScratch[i] = prefix
+	// 从后往前输出, 只用后半部分
 	_, err := c.bw.Write(c.lenScratch[i:])
 	printSend(c.lenScratch[i : len(c.lenScratch)-2])
 	return err
@@ -434,6 +442,7 @@ func (c *conn) writeInt64(n int64) error {
 }
 
 func (c *conn) writeFloat64(n float64) error {
+	// Negative precision means "only as much as needed to be exact."
 	return c.writeBytes(strconv.AppendFloat(c.numScratch[:0], n, 'g', -1, 64))
 }
 
@@ -472,7 +481,7 @@ func (c *conn) writeArg(arg interface{}, argumentTypeOK bool) (err error) {
 	case nil:
 		return c.writeString("")
 	case Argument:
-		if argumentTypeOK {
+		if argumentTypeOK { // 处理自定义 参数 自定义 String() 函数实现格式化
 			return c.writeArg(arg.RedisArg(), false)
 		}
 		// See comment in default clause below.
@@ -496,6 +505,7 @@ func (pe protocolError) Error() string {
 }
 
 // readLine reads a line of input from the RESP stream.
+// 去掉了 \r\n
 func (c *conn) readLine() ([]byte, error) {
 	// To avoid allocations, attempt to read the line using ReadSlice. This
 	// call typically succeeds. The known case where the call fails is when
@@ -506,7 +516,7 @@ func (c *conn) readLine() ([]byte, error) {
 		// allocating a buffer for the line.
 		// 读一点, 就放到缓冲区
 		buf := append([]byte{}, p...)
-		for err == bufio.ErrBufferFull {
+		for err == bufio.ErrBufferFull { // 循环读
 			p, err = c.br.ReadSlice('\n')
 			buf = append(buf, p...)
 		}
@@ -524,6 +534,7 @@ func (c *conn) readLine() ([]byte, error) {
 }
 
 // parseLen parses bulk string and array lengths.
+// 读取长度, 也是整数
 func parseLen(p []byte) (int, error) {
 	if len(p) == 0 {
 		return -1, protocolError("malformed length")
@@ -531,11 +542,11 @@ func parseLen(p []byte) (int, error) {
 
 	if p[0] == '-' && len(p) == 2 && p[1] == '1' {
 		// handle $-1 and $-1 null replies.
-		return -1, nil
+		return -1, nil // -1 是 空回复
 	}
 
 	var n int
-	for _, b := range p {
+	for _, b := range p { // 读取无符号整数
 		n *= 10
 		if b < '0' || b > '9' {
 			return -1, protocolError("illegal bytes in length")
@@ -547,6 +558,7 @@ func parseLen(p []byte) (int, error) {
 }
 
 // parseInt parses an integer reply.
+// 字符串转整数
 func parseInt(p []byte) (interface{}, error) {
 	if len(p) == 0 {
 		return 0, protocolError("malformed integer")
@@ -562,7 +574,7 @@ func parseInt(p []byte) (interface{}, error) {
 	}
 
 	var n int64
-	for _, b := range p {
+	for _, b := range p { // 从左到右读
 		n *= 10
 		if b < '0' || b > '9' {
 			return 0, protocolError("illegal bytes in length")
@@ -592,20 +604,20 @@ func (c *conn) readReply() (interface{}, error) {
 	switch line[0] {
 	case '+': // 状态回复
 		switch string(line[1:]) {
-		case "OK":
+		case "OK": // "+OK"
 			// Avoid allocation for frequent "+OK" response.
 			return okReply, nil
-		case "PONG":
+		case "PONG": // "+PONG"
 			// Avoid allocation in PING command benchmarks :)
 			return pongReply, nil
-		default:
+		default: // 原样返回
 			return string(line[1:]), nil
 		}
-	case '-': // 错误信息回复
+	case '-': // 错误信息回复, 原样返回
 		return Error(string(line[1:])), nil
 	case ':': // 整数回复
 		return parseInt(line[1:])
-	case '$': // 批量回复 大容量字符串 多消息回复里的单个命令
+	case '$': // 读一行 批量回复 大容量字符串 多消息回复里的单个命令 单个命令的回复
 		n, err := parseLen(line[1:]) // 读一行长度
 		if n < 0 || err != nil {
 			return nil, err
@@ -617,10 +629,10 @@ func (c *conn) readReply() (interface{}, error) {
 			return nil, err
 		}
 		printReply(p)
-		// 读调\r\n
+		// 读完\r\n
 		if line, err := c.readLine(); err != nil {
 			return nil, err
-		} else if len(line) != 0 {
+		} else if len(line) != 0 { // 应该只有\r\n, 读取到其他数据
 			return nil, protocolError("bad bulk string format")
 		}
 		return p, nil
@@ -633,6 +645,7 @@ func (c *conn) readReply() (interface{}, error) {
 		// 读多个回复
 		r := make([]interface{}, n)
 		for i := range r {
+			// 递归
 			r[i], err = c.readReply()
 			if err != nil {
 				return nil, err
@@ -643,6 +656,7 @@ func (c *conn) readReply() (interface{}, error) {
 	return nil, protocolError("unexpected response line")
 }
 
+// 也会刷到socket 内核缓冲区, 也就是发送服务器
 func (c *conn) Send(cmd string, args ...interface{}) error {
 	c.mu.Lock()
 	c.pending += 1
@@ -650,13 +664,15 @@ func (c *conn) Send(cmd string, args ...interface{}) error {
 	if c.writeTimeout != 0 {
 		c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 	}
+
+	// 写入, 会调用Flush函数, 清出空间, 所以需要写超时
 	if err := c.writeCommand(cmd, args); err != nil {
 		return c.fatal(err)
 	}
 	return nil
 }
 
-// 刷到socket 内核缓冲区, 也就是发送服务器
+// 剩余的都刷到socket 内核缓冲区, 也就是发送服务器
 func (c *conn) Flush() error {
 	if c.writeTimeout != 0 {
 		c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
@@ -711,7 +727,7 @@ func (c *conn) DoWithTimeout(readTimeout time.Duration, cmd string, args ...inte
 	c.pending = 0
 	c.mu.Unlock()
 
-	if cmd == "" && pending == 0 {
+	if cmd == "" && pending == 0 { // 没有命令, 也没有之前的命令
 		return nil, nil
 	}
 
@@ -736,7 +752,7 @@ func (c *conn) DoWithTimeout(readTimeout time.Duration, cmd string, args ...inte
 	}
 	c.conn.SetReadDeadline(deadline)
 
-	if cmd == "" { // 当前没有命令, 处理之前的
+	if cmd == "" { // 当前没有命令, 处理之前的, 返回之前的所有结果
 		reply := make([]interface{}, pending)
 		for i := range reply {
 			r, e := c.readReply()
@@ -748,14 +764,16 @@ func (c *conn) DoWithTimeout(readTimeout time.Duration, cmd string, args ...inte
 		return reply, nil
 	}
 
-	var err error
+	var err error // 多个命令, 回复, 谁先谁后?
 	var reply interface{}
-	// 只需要最后一条命令的结果
+	// 只需要最后一条命令的结果, 必须把前面的都读光
 	for i := 0; i <= pending; i++ {
 		var e error
 		if reply, e = c.readReply(); e != nil {
 			return nil, c.fatal(e)
 		}
+
+		// 处理错误回复
 		if e, ok := reply.(Error); ok && err == nil {
 			err = e
 		}

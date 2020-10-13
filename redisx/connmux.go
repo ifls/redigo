@@ -21,7 +21,7 @@ import (
 	"github.com/gomodule/redigo/redis"
 )
 
-// ConnMux multiplexes one or more connections to a single underlying
+// ConnMux multiplexes one or more connections to a single underlying 一个tcp连接的多路复用
 // connection. The ConnMux connections do not support concurrency, commands
 // that associate server side state with the connection or commands that put
 // the connection in a special mode.

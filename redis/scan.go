@@ -14,7 +14,7 @@
 
 package redis
 
-// 类型转换
+// 类型转换 扫描数据到指定变量, redis.Scan(reply, &value1, &value2)
 import (
 	"errors"
 	"fmt"

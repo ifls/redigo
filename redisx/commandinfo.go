@@ -29,7 +29,7 @@ type commandInfo struct {
 	notMuxable bool
 }
 
-var commandInfos = map[string]commandInfo{
+var commandInfos = map[string]commandInfo{ // 不多路复用
 	"WATCH":      {notMuxable: true},
 	"UNWATCH":    {notMuxable: true},
 	"MULTI":      {notMuxable: true},

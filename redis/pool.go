@@ -165,10 +165,10 @@ type Pool struct {
 	chInitialized uint32 // set to 1 when field ch is initialized
 
 	mu           sync.Mutex    // mu protects the following fields
-	closed       bool          // 关闭连接池 set to true when the pool is closed.
+	closed       bool          // 关闭连接池的标记 set to true when the pool is closed.
 	active       int           // the number of open connections in the pool
 	ch           chan struct{} // limits open connections when p.Wait is true
-	idle         idleList      // 空闲链表 idle connections
+	idle         idleList      // 空闲Conn连接链表 idle connections
 	waitCount    int64         // total number of connections waited for.
 	waitDuration time.Duration // total time waited for new connections.
 }
