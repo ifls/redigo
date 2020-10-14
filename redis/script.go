@@ -22,12 +22,18 @@ import (
 )
 
 // eval 命令 执行脚本 lua
+// evalsha 执行脚本 由hash指定的脚本
+// script debug 之后的脚本执行开启debug模式
+// script exists 判断脚本是否在redis脚本缓存内
+// script flush 清空缓存
+// script kill 终止当前脚本的执行
+// script load 加载脚本到脚本缓存
 // Script encapsulates the source, hash and key count for a Lua script.
 // See todo http://redis.io/commands/eval for information on scripts in Redis.
 type Script struct {
 	keyCount int
-	src      string
-	hash     string
+	src      string // 脚本代码
+	hash     string // 脚本hash值, 防篡改
 }
 
 // NewScript returns a new script object. If keyCount is greater than or equal
@@ -66,8 +72,10 @@ func (s *Script) Hash() string {
 // not loaded, then Do evaluates the script using the EVAL command (thus
 // causing the script to load).
 func (s *Script) Do(c Conn, keysAndArgs ...interface{}) (interface{}, error) {
+	// 先执行hash对应的脚本
 	v, err := c.Do("EVALSHA", s.args(s.hash, keysAndArgs)...)
-	if e, ok := err.(Error); ok && strings.HasPrefix(string(e), "NOSCRIPT ") {
+	if e, ok := err.(Error); ok && strings.HasPrefix(string(e), "NOSCRIPT ") { // 无缓存
+		// 执行脚本
 		v, err = c.Do("EVAL", s.args(s.src, keysAndArgs)...)
 	}
 	return v, err
@@ -86,6 +94,7 @@ func (s *Script) Send(c Conn, keysAndArgs ...interface{}) error {
 }
 
 // Load loads the script without evaluating it.
+// 将脚本缓存到服务器
 func (s *Script) Load(c Conn) error {
 	_, err := c.Do("SCRIPT", "LOAD", s.src)
 	return err
