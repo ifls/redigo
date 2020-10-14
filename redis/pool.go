@@ -36,7 +36,7 @@ var nowFunc = time.Now // for testing
 
 // ErrPoolExhausted is returned from a pool connection method (Do, Send,
 // Receive, Flush, Err) when the maximum number of database connections in the
-// pool has been reached.
+// pool has been reached. 连接数量达到上限
 var ErrPoolExhausted = errors.New("redigo: connection pool exhausted")
 
 var (
@@ -44,21 +44,20 @@ var (
 	errConnClosed = errors.New("redigo: connection closed")
 )
 
-// Pool maintains a pool of connections.
-// The application calls the Get method
-// to get a connection from the pool and the connection's Close method to
-// return the connection's resources to the pool.
+// Pool maintains a pool of connections. 对于请求-响应阻塞式的连接模式都需要连接池以用来提高并发性能
+// The application calls the Get method to get a connection from the pool and the connection's Close method to
+// return the connection's resources to the pool. Close是放回去
 //
 // The following example shows how to use a pool in a web application.
-// The application creates a pool at application startup and makes it available to
-// request handlers using a package level variable.
+// The application creates a pool at application startup启动 and makes it available to request handlers请求处理函数 using a
+// package level variable.
 // The pool configuration used here is an example, not a recommendation.
 //
 //  func newPool(addr string) *redis.Pool {
 //    return &redis.Pool{
 //      MaxIdle: 3,
 //      IdleTimeout: 240 * time.Second,
-//      // Dial or DialContext must be set. When both are set, DialContext takes precedence over Dial.
+//      // Dial or DialContext must be set. When both are set, DialContext takes precedence优先 over Dial.
 //      Dial: func () (redis.Conn, error) { return redis.Dial("tcp", addr) },
 //    }
 //  }
@@ -85,7 +84,7 @@ var (
 //
 // Use the Dial function to authenticate connections with the AUTH command or
 // select a database with the SELECT command:
-//
+// // 设置redis连接选项也可以达到auth 和 选数据库的目的
 //  pool := &redis.Pool{
 //    // Other pool configuration not shown in this example.
 //    Dial: func () (redis.Conn, error) {
@@ -107,7 +106,7 @@ var (
 //
 // Use the TestOnBorrow function to check the health of an idle connection before the connection is returned to the application.
 // This example PINGs connections that have been idle more than a minute:
-//
+// 返回给调用方前, 测试连接是否还是正常, 未断开连接的
 //  pool := &redis.Pool{
 //    // Other pool configuration not shown in this example.
 //    TestOnBorrow: func(c redis.Conn, t time.Time) error {
@@ -121,14 +120,14 @@ var (
 //
 type Pool struct {
 	// Dial is an application supplied function for creating and configuring a
-	// connection.
+	// connection. 创建并配置连接
 	//
 	// The connection returned from Dial must not be in a special state
-	// (subscribed to pubsub channel, transaction started, ...).
+	// (subscribed to pubsub channel, transaction started, ...). 处于发布订阅状态或者事务状态的连接 不应该给调用方
 	Dial func() (Conn, error)
 
 	// DialContext is an application supplied function for creating and configuring a
-	// connection with the given context.
+	// connection with the given context. 带上下文
 	//
 	// The connection returned from Dial must not be in a special state
 	// (subscribed to pubsub channel, transaction started, ...).
@@ -147,30 +146,31 @@ type Pool struct {
 
 	// Maximum number of connections allocated by the pool at a given time.
 	// When zero, there is no limit on the number of connections in the pool.
-	MaxActive int
+	MaxActive int // 0 表示不限制
 
 	// Close connections after remaining idle for this duration. If the value
 	// is zero, then idle connections are not closed. Applications should set
 	// the timeout to a value less than the server's timeout.
-	IdleTimeout time.Duration
+	IdleTimeout time.Duration // 超时超过此限制, 关闭
 
 	// If Wait is true and the pool is at the MaxActive limit, then Get() waits
 	// for a connection to be returned to the pool before returning.
+	// wait == true 表示阻塞模式, == false, 表示非阻塞
 	Wait bool // 连接过多, true表示等待可以拿到实际可用的连接 主动设置的值
 
 	// Close connections older than this duration. If the value is zero, then
 	// the pool does not close connections based on age.
-	MaxConnLifetime time.Duration
+	MaxConnLifetime time.Duration // 删除太久的连接
 
-	chInitialized uint32 // set to 1 when field ch is initialized
+	chInitialized uint32 // ch初始化成功的标记 set to 1 when field ch is initialized
 
 	mu           sync.Mutex    // mu protects the following fields
-	closed       bool          // 关闭连接池的标记 set to true when the pool is closed.
-	active       int           // the number of open connections in the pool
+	closed       bool          // 已关闭连接池的标记 set to true when the pool is closed.
+	active       int           // 成功打开的连接数量 the number of open connections in the pool
 	ch           chan struct{} // limits open connections when p.Wait is true
-	idle         idleList      // 空闲Conn连接链表 idle connections
-	waitCount    int64         // total number of connections waited for.
-	waitDuration time.Duration // total time waited for new connections.
+	idle         idleList      // 空闲Conn连接链表 idle connections, 其他的要么未创建, 要么在调用方未返回
+	waitCount    int64         // 只是统计累加量, total number of connections waited for.
+	waitDuration time.Duration // 只是用于统计信息, total time waited for new connections.
 }
 
 // NewPool creates a new pool.
@@ -201,7 +201,7 @@ func (p *Pool) Get() Conn {
 // returned connection.
 func (p *Pool) GetContext(ctx context.Context) (Conn, error) {
 	// Wait until there is a vacant connection in the pool.
-	// 等待空闲连接
+	// 等待有空闲连接, 应该这里就加锁的, 可能两个goroutine, 判断了有连接, 但是只有一个能拿到, 另一个直接新创建了, 这样就出现超量了
 	waited, err := p.waitVacantConn(ctx)
 	if err != nil {
 		return errorConn{err}, err
@@ -214,12 +214,13 @@ func (p *Pool) GetContext(ctx context.Context) (Conn, error) {
 		p.waitDuration += waited
 	}
 
-	// Prune stale超时 connections at the back of the idle list.
+	// Prune删除 stale超时,过时 connections at the back of the idle list.
 	if p.IdleTimeout > 0 {
 		n := p.idle.count
 		for i := 0; i < n && p.idle.back != nil && p.idle.back.t.Add(p.IdleTimeout).Before(nowFunc()); i++ {
-			pc := p.idle.back
-			p.idle.popBack()
+			// 超时的
+			pc := p.idle.back // 拿到
+			p.idle.popBack()  // 弹出
 			p.mu.Unlock()
 			pc.c.Close()
 			p.mu.Lock()
@@ -232,11 +233,12 @@ func (p *Pool) GetContext(ctx context.Context) (Conn, error) {
 		pc := p.idle.front
 		p.idle.popFront()
 		p.mu.Unlock()
-		// 拿到空闲连接
+		// 拿到空闲连接, 测试监控
 		if (p.TestOnBorrow == nil || p.TestOnBorrow(pc.c, pc.t) == nil) &&
 			(p.MaxConnLifetime == 0 || nowFunc().Sub(pc.created) < p.MaxConnLifetime) {
 			return &activeConn{p: p, pc: pc}, nil
 		}
+		// 不健康的关闭掉
 		pc.c.Close()
 		p.mu.Lock()
 		p.active--
@@ -250,11 +252,12 @@ func (p *Pool) GetContext(ctx context.Context) (Conn, error) {
 	}
 
 	// Handle limit for p.Wait == false.
+	// 不等待并且 超量, 直接拿不到连接, 返回失败
 	if !p.Wait && p.MaxActive > 0 && p.active >= p.MaxActive {
 		p.mu.Unlock()
 		// 拿不到连接
 		return errorConn{ErrPoolExhausted}, ErrPoolExhausted
-	}
+	} // 应该再判断wait的, 但是上面就加锁了, 所以 上面检查了也是可以的
 
 	p.active++
 	p.mu.Unlock()
@@ -322,6 +325,7 @@ func (p *Pool) IdleCount() int {
 }
 
 // Close releases the resources used by the pool.
+//
 func (p *Pool) Close() error {
 	p.mu.Lock()
 	if p.closed {
@@ -329,13 +333,17 @@ func (p *Pool) Close() error {
 		return nil
 	}
 	p.closed = true
+
 	p.active -= p.idle.count
+
 	pc := p.idle.front
 	p.idle.count = 0
 	p.idle.front, p.idle.back = nil, nil
+
 	if p.ch != nil {
 		close(p.ch)
 	}
+
 	p.mu.Unlock()
 	for ; pc != nil; pc = pc.next {
 		pc.c.Close()
@@ -343,7 +351,7 @@ func (p *Pool) Close() error {
 	return nil
 }
 
-// sync.Once更好
+// 用 sync.Once更好
 func (p *Pool) lazyInit() {
 	// Fast path.
 	if atomic.LoadUint32(&p.chInitialized) == 1 {
@@ -373,9 +381,9 @@ func (p *Pool) lazyInit() {
 //
 // If there were no vacant connection in the pool right away it returns the time spent waiting
 // for that connection to appear in the pool.
-// valid 空闲
+// Vacant 空闲
 func (p *Pool) waitVacantConn(ctx context.Context) (waited time.Duration, err error) {
-	if !p.Wait || p.MaxActive <= 0 {
+	if !p.Wait || p.MaxActive <= 0 { // 不等待 或者 不限制
 		// No wait or no connection limit.
 		return 0, nil
 	}
@@ -384,7 +392,7 @@ func (p *Pool) waitVacantConn(ctx context.Context) (waited time.Duration, err er
 
 	// wait indicates if we believe it will block so its not 100% accurate
 	// however for stats it should be good enough.
-	wait := len(p.ch) == 0
+	wait := len(p.ch) == 0 // 没有可用的, 需要阻塞一会儿, 计时
 	var start time.Time
 	if wait {
 		start = time.Now()
@@ -398,6 +406,7 @@ func (p *Pool) waitVacantConn(ctx context.Context) (waited time.Duration, err er
 		case <-ctx.Done():
 			return 0, ctx.Err()
 		default:
+			// 阻塞直到有可用连接
 		}
 	case <-ctx.Done():
 		return 0, ctx.Err()
@@ -421,12 +430,14 @@ func (p *Pool) dial(ctx context.Context) (Conn, error) {
 
 func (p *Pool) put(pc *poolConn, forceClose bool) error {
 	p.mu.Lock()
+
+	// 已关闭或者 必须关闭,
 	if !p.closed && !forceClose {
 		pc.t = nowFunc()
-		p.idle.pushFront(pc)
+		p.idle.pushFront(pc) // 入队
 		if p.idle.count > p.MaxIdle {
 			pc = p.idle.back
-			p.idle.popBack()
+			p.idle.popBack() // 退队
 		} else {
 			pc = nil
 		}
@@ -440,6 +451,7 @@ func (p *Pool) put(pc *poolConn, forceClose bool) error {
 	}
 
 	if p.ch != nil && !p.closed {
+		// 可用连接数+1
 		p.ch <- struct{}{}
 	}
 	p.mu.Unlock()
@@ -478,14 +490,17 @@ func (ac *activeConn) Close() error {
 	}
 	ac.pc = nil
 
-	if ac.state&connectionMultiState != 0 {
+	// 这三种状态 需要清除, 再放回连接池复用
+	if ac.state&connectionMultiState != 0 { // 事务
 		pc.c.Send("DISCARD")
+
+		// 清零状态
 		ac.state &^= (connectionMultiState | connectionWatchState)
-	} else if ac.state&connectionWatchState != 0 {
+	} else if ac.state&connectionWatchState != 0 { // 监视
 		pc.c.Send("UNWATCH")
 		ac.state &^= connectionWatchState
 	}
-	if ac.state&connectionSubscribeState != 0 {
+	if ac.state&connectionSubscribeState != 0 { // pubsub
 		pc.c.Send("UNSUBSCRIBE")
 		pc.c.Send("PUNSUBSCRIBE")
 		// To detect the end of the message stream, ask the server to echo
@@ -505,6 +520,8 @@ func (ac *activeConn) Close() error {
 			}
 		}
 	}
+
+	// 必须弄完缓冲的命令, 读光缓存 再放回去
 	pc.c.Do("")
 	// 放回池子
 	ac.p.put(pc, ac.state != 0 || pc.c.Err() != nil)
@@ -525,6 +542,7 @@ func (ac *activeConn) Do(commandName string, args ...interface{}) (reply interfa
 		return nil, errConnClosed
 	}
 	ci := lookupCommandInfo(commandName)
+	// 管理状态, 控制回收
 	ac.state = (ac.state | ci.Set) &^ ci.Clear
 	return pc.c.Do(commandName, args...)
 }
