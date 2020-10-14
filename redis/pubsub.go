@@ -23,10 +23,10 @@ import (
 // Subscription represents a subscribe or unsubscribe notification.
 type Subscription struct {
 	// Kind is "subscribe", "unsubscribe", "psubscribe" or "punsubscribe"
-	Kind string
+	Kind string // 是哪个命令
 
 	// The channel that was changed.
-	Channel string
+	Channel string //
 
 	// The current number of subscriptions for connection.
 	Count int
