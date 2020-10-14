@@ -21,10 +21,12 @@ import (
 	"github.com/gomodule/redigo/redis"
 )
 
-// ConnMux multiplexes one or more connections to a single underlying 一个tcp连接的多路复用
-// connection. The ConnMux connections do not support concurrency, commands
-// that associate server side state with the connection or commands that put
-// the connection in a special mode.
+// ConnMux multiplexes one or more connections to a single underlying connection. 一个tcp连接的多路复用
+
+// The ConnMux connections do not support concurrency,
+// commands that associate server side state with the connection
+// or
+// commands that put the connection in a special mode.
 type ConnMux struct {
 	c redis.Conn
 
@@ -43,7 +45,7 @@ func NewConnMux(c redis.Conn) *ConnMux {
 // Get gets a connection. The application must close the returned connection.
 func (p *ConnMux) Get() redis.Conn {
 	c := &muxConn{p: p}
-	c.ids = c.buf[:0]
+	c.ids = c.buf[:0] // 数组可以进行切片操作, 生成新的切片
 	return c
 }
 
@@ -55,7 +57,7 @@ func (p *ConnMux) Close() error {
 type muxConn struct {
 	p   *ConnMux
 	ids []uint
-	buf [8]uint
+	buf [8]uint // 缓存
 }
 
 func (c *muxConn) send(flush bool, cmd string, args ...interface{}) error {
@@ -64,8 +66,9 @@ func (c *muxConn) send(flush bool, cmd string, args ...interface{}) error {
 	}
 	p := c.p
 	p.sendMu.Lock()
-	id := p.sendID
+	id := p.sendID // 记录发送id
 	c.ids = append(c.ids, id)
+
 	p.sendID++
 	err := p.c.Send(cmd, args...)
 	if flush {
@@ -87,6 +90,7 @@ func (c *muxConn) Flush() error {
 	return err
 }
 
+// 接收端, 多路复用
 func (c *muxConn) Receive() (interface{}, error) {
 	if len(c.ids) == 0 {
 		return nil, errors.New("mux pool underflow")
@@ -104,7 +108,7 @@ func (c *muxConn) Receive() (interface{}, error) {
 		ch := make(chan struct{})
 		p.recvWait[id] = ch
 		p.recvMu.Unlock()
-		<-ch
+		<-ch // 阻塞
 		p.recvMu.Lock()
 		if p.recvID != id {
 			panic("out of sync")
@@ -121,6 +125,7 @@ func (c *muxConn) Receive() (interface{}, error) {
 	}
 	p.recvMu.Unlock()
 	if ok {
+		// 解除其他的阻塞
 		ch <- struct{}{}
 	}
 

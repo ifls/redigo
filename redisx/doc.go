@@ -12,6 +12,6 @@
 // License for the specific language governing permissions and limitations
 // under the License.
 
-// Package redisx contains experimental features for Redigo. Features in this
+// Package redisx contains experimental试验 features for Redigo. Features in this
 // package may be modified or deleted at any time.
 package redisx
